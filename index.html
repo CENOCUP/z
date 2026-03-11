@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<title>CenoCup Champions Legends</title>
+
+<style>
+
+body{
+background:#001035;
+color:white;
+font-family:Arial;
+margin:0;
+padding:20px;
+}
+
+h1{
+text-align:center;
+cursor:pointer;
+}
+
+.tabs{
+text-align:center;
+margin-bottom:20px;
+}
+
+button{
+padding:10px;
+margin:3px;
+cursor:pointer;
+border:none;
+background:#003c9e;
+color:white;
+border-radius:4px;
+}
+
+.view{
+display:none;
+}
+
+.active{
+display:block;
+}
+
+table{
+width:100%;
+border-collapse:collapse;
+background:#0b1f4f;
+border-radius:8px;
+overflow:hidden;
+}
+
+th{
+background:#003c9e;
+color:white;
+font-weight:bold;
+}
+
+td{
+background:#0f2a6b;
+padding:8px;
+text-align:center;
+}
+
+tr:nth-child(even) td{
+background:#12307a;
+}
+
+tr:hover td{
+background:#1c3fa8;
+}
+
+#admin{
+display:none;
+margin-bottom:20px;
+padding:15px;
+background:#111;
+border-radius:8px;
+}
+
+input{
+width:60px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<h1 onclick="openAdmin()">CENOCUP CHAMPIONS LEGENDS</h1>
+
+<div id="admin">
+
+<button onclick="addPlayer()">Novo Técnico</button>
+<button onclick="saveDB()">Salvar</button>
+<button onclick="backup()">Backup</button>
+<button onclick="importar()">Importar</button>
+
+<input type="file" id="fileInput" style="display:none">
+
+<div id="editor"></div>
+
+</div>
+
+<div class="tabs">
+
+<button onclick="showTab('tabela')">Tabela</button>
+<button onclick="showTab('ranking')">Ranking</button>
+<button onclick="showTab('medalhas')">Medalhas</button>
+<button onclick="showTab('forca')">Força</button>
+<button onclick="showTab('overall')">Overall</button>
+<button onclick="showTab('rival')">Rivalidades</button>
+<button onclick="showTab('hall')">Hall da Fama</button>
+
+</div>
+
+<div id="tabela" class="view active">
+<table id="table"></table>
+</div>
+
+<div id="ranking" class="view">
+<table id="rankingTable"></table>
+</div>
+
+<div id="medalhas" class="view">
+<table id="medalTable"></table>
+</div>
+
+<div id="forca" class="view">
+<div id="power"></div>
+</div>
+
+<div id="overall" class="view">
+<table id="overallTable"></table>
+</div>
+
+<div id="rival" class="view">
+<div id="rivalContent"></div>
+</div>
+
+<div id="hall" class="view">
+<div id="hallContent"></div>
+</div>
+
+<script>
+
+const STORAGE="cenocup_db"
+
+let db=JSON.parse(localStorage.getItem(STORAGE))||{
+
+atual:[
+{tecnico:"Carlos",v:3,e:1,d:1,gp:10,gc:6},
+{tecnico:"Joao",v:2,e:2,d:1,gp:8,gc:7},
+{tecnico:"Pedro",v:1,e:1,d:3,gp:6,gc:10}
+],
+
+historico:[]
+
+}
+
+function pontos(j){
+return j.v*3+j.e
+}
+
+function jogos(j){
+return j.v+j.e+j.d
+}
+
+function forca(j){
+return (j.gp*3.5)-(j.gc*2.5)
+}
+
+function showTab(id){
+
+document.querySelectorAll(".view").forEach(v=>{
+v.classList.remove("active")
+})
+
+document.getElementById(id).classList.add("active")
+
+renderAll()
+
+}
+
+function renderTabela(){
+
+let list=[...db.atual]
+
+list.sort((a,b)=>pontos(b)-pontos(a)||(b.gp-b.gc)-(a.gp-a.gc))
+
+let html=`
+<tr>
+<th>#</th>
+<th>Técnico</th>
+<th>J</th>
+<th>PTS</th>
+<th>V</th>
+<th>E</th>
+<th>D</th>
+<th>GP</th>
+<th>GC</th>
+<th>SG</th>
+</tr>
+`
+
+list.forEach((j,i)=>{
+
+let classe=i==0?"style='background:#1d7a1d;font-weight:bold'":""
+
+html+=`
+<tr ${classe}>
+<td>${i+1}</td>
+<td>${j.tecnico}</td>
+<td>${jogos(j)}</td>
+<td>${pontos(j)}</td>
+<td>${j.v}</td>
+<td>${j.e}</td>
+<td>${j.d}</td>
+<td>${j.gp}</td>
+<td>${j.gc}</td>
+<td>${j.gp-j.gc}</td>
+</tr>
+`
+
+})
+
+document.getElementById("table").innerHTML=html
+
+}
+
+function calcOverall(){
+
+let list=[...db.atual]
+
+list.sort((a,b)=>pontos(b)-pontos(a)||(b.gp-b.gc)-(a.gp-a.gc))
+
+let data=[]
+
+list.forEach((j,i)=>{
+
+let jogos=j.v+j.e+j.d
+if(jogos===0) jogos=1
+
+let pts=j.v*3+j.e
+
+let ataque=(j.gp/jogos)*25
+let defesa=100-((j.gc/jogos)*25)
+let performance=(pts/(jogos*3))*100
+let bonus=Math.max(0,25-(i*5))
+
+let ovr=
+(ataque*0.30)+
+(defesa*0.25)+
+(performance*0.25)+
+bonus
+
+let nivel="FRACO"
+
+if(ovr>=90) nivel="LENDÁRIO"
+else if(ovr>=80) nivel="ELITE"
+else if(ovr>=70) nivel="FORTE"
+else if(ovr>=60) nivel="MÉDIO"
+
+data.push({
+nome:j.tecnico,
+ataque:ataque.toFixed(1),
+defesa:defesa.toFixed(1),
+performance:performance.toFixed(1),
+bonus:bonus,
+ovr:ovr.toFixed(1),
+nivel:nivel
+})
+
+})
+
+return data
+
+}
+
+function renderOverall(){
+
+let dados=calcOverall()
+
+dados.sort((a,b)=>b.ovr-a.ovr)
+
+let html=`
+<tr>
+<th>#</th>
+<th>Técnico</th>
+<th>Ataque</th>
+<th>Defesa</th>
+<th>Performance</th>
+<th>Bônus</th>
+<th>OVR</th>
+<th>Nível</th>
+</tr>
+`
+
+dados.forEach((j,i)=>{
+
+html+=`
+<tr>
+<td>${i+1}</td>
+<td>${j.nome}</td>
+<td>${j.ataque}</td>
+<td>${j.defesa}</td>
+<td>${j.performance}</td>
+<td>${j.bonus}</td>
+<td><b>${j.ovr}</b></td>
+<td>${j.nivel}</td>
+</tr>
+`
+
+})
+
+document.getElementById("overallTable").innerHTML=html
+
+}
+
+function renderRanking(){
+
+let html="<tr><th>Técnico</th><th>Pontos</th></tr>"
+
+db.atual.forEach(j=>{
+html+=`<tr><td>${j.tecnico}</td><td>${pontos(j)}</td></tr>`
+})
+
+document.getElementById("rankingTable").innerHTML=html
+
+}
+
+function renderMedalhas(){
+document.getElementById("medalTable").innerHTML="<tr><td>Sem histórico ainda</td></tr>"
+}
+
+function renderForca(){
+
+let html=""
+
+db.atual.forEach(j=>{
+html+=`${j.tecnico} : ${forca(j).toFixed(1)}<br>`
+})
+
+document.getElementById("power").innerHTML=html
+
+}
+
+function renderRival(){
+
+let html=""
+
+for(let i=0;i<db.atual.length;i++){
+for(let j=i+1;j<db.atual.length;j++){
+
+html+=`${db.atual[i].tecnico} VS ${db.atual[j].tecnico}<br>`
+
+}
+}
+
+document.getElementById("rivalContent").innerHTML=html
+
+}
+
+function renderHall(){
+
+let html=""
+
+db.historico.forEach(h=>{
+
+html+=`<h3>${h.nome}</h3>`
+
+h.dados.forEach((j,i)=>{
+
+html+=`${i+1}º ${j.tecnico}<br>`
+
+})
+
+})
+
+document.getElementById("hallContent").innerHTML=html
+
+}
+
+function renderAll(){
+
+renderTabela()
+renderRanking()
+renderMedalhas()
+renderForca()
+renderOverall()
+renderRival()
+renderHall()
+
+}
+
+function saveDB(){
+localStorage.setItem(STORAGE,JSON.stringify(db))
+}
+
+function backup(){
+
+let dados=JSON.stringify(db,null,2)
+
+let blob=new Blob([dados],{type:"application/json"})
+
+let link=document.createElement("a")
+
+link.href=URL.createObjectURL(blob)
+
+link.download="cenocup_backup.json"
+
+link.click()
+
+}
+
+function importar(){
+
+let input=document.getElementById("fileInput")
+
+input.click()
+
+input.onchange=function(){
+
+let file=input.files[0]
+
+let reader=new FileReader()
+
+reader.onload=function(e){
+
+db=JSON.parse(e.target.result)
+
+saveDB()
+
+renderAll()
+
+}
+
+reader.readAsText(file)
+
+}
+
+}
+
+window.onbeforeunload=function(){
+saveDB()
+}
+
+function openAdmin(){
+
+let pass=prompt("Senha:")
+
+if(pass==="123"){
+
+document.getElementById("admin").style.display="block"
+
+renderEditor()
+
+}
+
+}
+
+function renderEditor(){
+
+let html=""
+
+db.atual.forEach((j,i)=>{
+
+html+=`
+
+<div>
+
+${j.tecnico}
+
+V<input value="${j.v}" onchange="db.atual[${i}].v=this.value">
+
+E<input value="${j.e}" onchange="db.atual[${i}].e=this.value">
+
+D<input value="${j.d}" onchange="db.atual[${i}].d=this.value">
+
+GP<input value="${j.gp}" onchange="db.atual[${i}].gp=this.value">
+
+GC<input value="${j.gc}" onchange="db.atual[${i}].gc=this.value">
+
+</div>
+
+`
+
+})
+
+document.getElementById("editor").innerHTML=html
+
+}
+
+function addPlayer(){
+
+db.atual.push({
+tecnico:"Novo",
+v:0,
+e:0,
+d:0,
+gp:0,
+gc:0
+})
+
+renderEditor()
+
+}
+
+renderAll()
+
+</script>
+
+</body>
+</html>
