@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>CenoCup Champions Legends</title>
+    <style>
+        :root {
+            --bg-primary: #001035;
+            --bg-secondary: #0b1f4f;
+            --accent: #003c9e;
+            --hover: #1c3fa8;
+            --success: #1d7a1d;
+        }
+
+        body { background: var(--bg-primary); color: white; font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 20px; }
+        h1 { text-align: center; cursor: pointer; text-transform: uppercase; letter-spacing: 2px; }
+        
+        .tabs { text-align: center; margin-bottom: 20px; position: sticky; top: 0; background: var(--bg-primary); padding: 10px; z-index: 10; }
+        button { padding: 10px 20px; margin: 3px; cursor: pointer; border: none; background: var(--accent); color: white; border-radius: 4px; transition: 0.3s; }
+        button:hover { background: var(--hover); }
+
+        .view { display: none; animation: fadeIn 0.3s; }
+        .active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        table { width: 100%; border-collapse: collapse; background: var(--bg-secondary); border-radius: 8px; overflow: hidden; margin-top: 10px; }
+        th { background: var(--accent); padding: 12px; font-size: 0.9em; }
+        td { background: #0f2a6b; padding: 10px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        tr:nth-child(even) td { background: #12307a; }
+        
+        .ranking-top td { background: var(--success) !important; font-weight: bold; }
+        
+        #admin { display: none; margin-bottom: 20px; padding: 20px; background: #111; border: 1px dashed #444; border-radius: 8px; }
+        .editor-row { display: grid; grid-template-columns: 1fr repeat(5, 80px); gap: 10px; margin-bottom: 10px; align-items: center; }
+        input { padding: 5px; border-radius: 4px; border: 1px solid #444; background: #222; color: white; text-align: center; }
+    </style>
+</head>
+<body>
+
+<h1 onclick="openAdmin()">CENOCUP CHAMPIONS LEGENDS</h1>
+
+<div id="admin">
+    <div style="margin-bottom: 15px;">
+        <button onclick="addPlayer()">+ Novo Técnico</button>
+        <button onclick="saveDB()" style="background: #28a745;">💾 Salvar Alterações</button>
+        <button onclick="backup()">📥 Exportar Backup</button>
+        <button onclick="importar()">📤 Importar JSON</button>
+    </div>
+    <input type="file" id="fileInput" style="display:none">
+    <div id="editor"></div>
+</div>
+
+<div class="tabs">
+    <button onclick="showTab('tabela')">Tabela</button>
+    <button onclick="showTab('overall')">Geral (OVR)</button>
+    <button onclick="showTab('forca')">Power Index</button>
+    <button onclick="showTab('hall')">Histórico</button>
+</div>
+
+<div id="tabela" class="view active"><table id="tableMain"></table></div>
+<div id="overall" class="view"><table id="tableOverall"></table></div>
+<div id="forca" class="view"><table id="tablePower"></table></div>
+<div id="hall" class="view"><div id="hallContent"></div></div>
+
+<script>
+const STORAGE = "cenocup_db";
+
+let db = JSON.parse(localStorage.getItem(STORAGE)) || {
+    atual: [
+        {tecnico: "Carlos", v: 3, e: 1, d: 1, gp: 10, gc: 6},
+        {tecnico: "Joao", v: 2, e: 2, d: 1, gp: 8, gc: 7}
+    ],
+    historico: []
+};
+
+// --- MATEMÁTICA CORE ---
+const calc = {
+    pts: j => (j.v * 3) + Number(j.e),
+    jogos: j => Number(j.v) + Number(j.e) + Number(j.d),
+    sg: j => j.gp - j.gc,
+    // Força: Saldo de gols ponderado por eficiência (GP tem mais peso que evitar GC)
+    forca: j => {
+        const total = calc.jogos(j) || 1;
+        return ((j.gp * 1.5) - (j.gc * 1.0)) / total;
+    },
+    // Overall: Escala de 0 a 100
+    overall: (j, rank) => {
+        const totalJogos = calc.jogos(j) || 1;
+        const vitoriasSocio = (j.v / totalJogos) * 100;
+        const ataque = Math.min(100, (j.gp / (totalJogos * 3)) * 100); 
+        const defesa = Math.max(0, 100 - ((j.gc / totalJogos) * 20));
+        const bonusPosicao = Math.max(0, 10 - rank); // Pequeno bônus para os líderes
+        
+        const ovr = (vitoriasSocio * 0.4) + (ataque * 0.3) + (defesa * 0.3) + bonusPosicao;
+        return Math.min(99, ovr).toFixed(1);
+    }
+};
+
+function showTab(id) {
+    document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+    document.getElementById(id).classList.add("active");
+    renderAll();
+}
+
+function renderAll() {
+    // Ordenação base (Pontos > Saldo > Gols Pró)
+    const list = [...db.atual].sort((a, b) => 
+        calc.pts(b) - calc.pts(a) || calc.sg(b) - calc.sg(a) || b.gp - a.gp
+    );
+
+    renderTabela(list);
+    renderOverall(list);
+    renderPower(list);
+}
+
+function renderTabela(list) {
+    let html = `<tr><th>#</th><th>Técnico</th><th>J</th><th>PTS</th><th>V</th><th>E</th><th>D</th><th>GP</th><th>GC</th><th>SG</th></tr>`;
+    list.forEach((j, i) => {
+        html += `<tr class="${i === 0 ? 'ranking-top' : ''}">
+            <td>${i + 1}</td>
+            <td>${j.tecnico}</td>
+            <td>${calc.jogos(j)}</td>
+            <td>${calc.pts(j)}</td>
+            <td>${j.v}</td>
+            <td>${j.e}</td>
+            <td>${j.d}</td>
+            <td>${j.gp}</td>
+            <td>${j.gc}</td>
+            <td>${calc.sg(j)}</td>
+        </tr>`;
+    });
+    document.getElementById("tableMain").innerHTML = html;
+}
+
+function renderOverall(list) {
+    let html = `<tr><th>Técnico</th><th>OVR</th><th>Nível</th></tr>`;
+    list.forEach((j, i) => {
+        const ovr = calc.overall(j, i);
+        let cor = "#ccc";
+        if(ovr >= 85) cor = "#ff4500"; // Lendário
+        else if(ovr >= 75) cor = "#ffa500"; // Elite
+        
+        html += `<tr>
+            <td>${j.tecnico}</td>
+            <td style="color:${cor}; font-size: 1.2em; font-weight:bold">${ovr}</td>
+            <td>${ovr >= 85 ? 'LENDÁRIO' : ovr >= 70 ? 'ELITE' : 'COMPETITIVO'}</td>
+        </tr>`;
+    });
+    document.getElementById("tableOverall").innerHTML = html;
+}
+
+function renderPower(list) {
+    let html = `<tr><th>Técnico</th><th>Power Index</th><th>Status</th></tr>`;
+    list.sort((a,b) => calc.forca(b) - calc.forca(a)).forEach(j => {
+        const f = calc.forca(j).toFixed(2);
+        html += `<tr>
+            <td>${j.tecnico}</td>
+            <td>${f}</td>
+            <td>${f > 1 ? '🔥 Dominante' : f > 0 ? '⚖️ Estável' : '⚠️ Crise'}</td>
+        </tr>`;
+    });
+    document.getElementById("tablePower").innerHTML = html;
+}
+
+// --- ADMIN & DATA ---
+function openAdmin() {
+    const pass = prompt("Acesso restrito:");
+    if (pass === "123") {
+        document.getElementById("admin").style.display = "block";
+        renderEditor();
+    }
+}
+
+function renderEditor() {
+    let html = "";
+    db.atual.forEach((j, i) => {
+        html += `
+        <div class="editor-row">
+            <input type="text" value="${j.tecnico}" onchange="db.atual[${i}].tecnico=this.value">
+            V <input type="number" value="${j.v}" onchange="db.atual[${i}].v=Number(this.value)">
+            E <input type="number" value="${j.e}" onchange="db.atual[${i}].e=Number(this.value)">
+            D <input type="number" value="${j.d}" onchange="db.atual[${i}].d=Number(this.value)">
+            GP <input type="number" value="${j.gp}" onchange="db.atual[${i}].gp=Number(this.value)">
+            GC <input type="number" value="${j.gc}" onchange="db.atual[${i}].gc=Number(this.value)">
+        </div>`;
+    });
+    document.getElementById("editor").innerHTML = html;
+}
+
+function addPlayer() {
+    db.atual.push({tecnico: "Novo", v: 0, e: 0, d: 0, gp: 0, gc: 0});
+    renderEditor();
+}
+
+function saveDB() {
+    localStorage.setItem(STORAGE, JSON.stringify(db));
+    alert("Dados salvos com sucesso!");
+    renderAll();
+}
+
+function backup() {
+    const blob = new Blob([JSON.stringify(db, null, 2)], {type: "application/json"});
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `cenocup_backup_${new Date().getTime()}.json`;
+    link.click();
+}
+
+function importar() {
+    const input = document.getElementById("fileInput");
+    input.click();
+    input.onchange = () => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            db = JSON.parse(e.target.result);
+            saveDB();
+            renderAll();
+        };
+        reader.readAsText(input.files[0]);
+    };
+}
+
+renderAll();
+</script>
+</body>
+</html>
